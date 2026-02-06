@@ -10,9 +10,43 @@ echo "🧪 InputShare Connection Test"
 echo "============================="
 echo ""
 
+# Check architecture compatibility
+echo "🔍 Checking system architecture..."
+ARCH=$(uname -m)
+echo "   System: $ARCH"
+echo "   Shell: $(arch 2>/dev/null || echo 'unknown')"
+
+if [ "$ARCH" != "arm64" ] && [ "$ARCH" != "x86_64" ]; then
+    echo "   ⚠️  Unexpected architecture: $ARCH"
+fi
+
+# Auto-detect the binary path based on current architecture
+if [ -f "$SCRIPT_DIR/.build/arm64-apple-macosx/debug/inputshare" ]; then
+    BINARY_PATH="$SCRIPT_DIR/.build/arm64-apple-macosx/debug/inputshare"
+elif [ -f "$SCRIPT_DIR/.build/x86_64-apple-macosx/debug/inputshare" ]; then
+    BINARY_PATH="$SCRIPT_DIR/.build/x86_64-apple-macosx/debug/inputshare"
+else
+    echo "   ❌ Binary not found in either architecture directory"
+    echo "   Run: ./rebuild.sh"
+    exit 1
+fi
+
+echo "   Using binary: $BINARY_PATH"
+
+BINARY_ARCH=$(file "$BINARY_PATH" | grep -o 'arm64\|x86_64' | head -1)
+echo "   Binary: $BINARY_ARCH"
+
+if [ "$ARCH" != "$BINARY_ARCH" ]; then
+    echo "   ⚠️  Architecture mismatch!"
+    echo "   You may need to rebuild for your architecture:"
+    echo "   swift build --arch $ARCH"
+    echo ""
+fi
+
 # Check if permissions are granted first
 if [ -f "./check-permissions.sh" ]; then
-    echo "📋 Checking permissions first..."
+    echo ""
+    echo "📋 Checking permissions..."
     ./check-permissions.sh
     if [ $? -ne 0 ]; then
         echo ""
@@ -23,7 +57,7 @@ if [ -f "./check-permissions.sh" ]; then
 fi
 
 echo "🚀 Step 1: Starting receiver..."
-.build/arm64-apple-macosx/debug/inputshare receive \
+"$BINARY_PATH" receive \
   --port 4242 \
   --identity-p12 .certs/device-a.p12 \
   --identity-pass inputshare-dev \
@@ -49,7 +83,7 @@ fi
 
 echo ""
 echo "🚀 Step 2: Starting sender (will run for 5 seconds)..."
-.build/arm64-apple-macosx/debug/inputshare send \
+"$BINARY_PATH" send \
   --host 127.0.0.1 \
   --port 4242 \
   --identity-p12 .certs/device-b.p12 \
