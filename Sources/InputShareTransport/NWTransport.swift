@@ -66,10 +66,17 @@ public enum NWTransport {
     }
 
     private static func verifyPinnedCertificate(trust: SecTrust, pinnedHex: String) -> Bool {
-        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let cert = chain.first else { return false }
+        guard let chain = SecTrustCopyCertificateChain(trust) as? [SecCertificate], let cert = chain.first else {
+            print("[TLS] Failed to get certificate chain")
+            return false
+        }
         let data = SecCertificateCopyData(cert) as Data
         let digest = SHA256.hash(data: data)
         let hex = digest.compactMap { String(format: "%02x", $0) }.joined()
-        return hex == pinnedHex.lowercased()
+        let matches = hex == pinnedHex.lowercased()
+        print("[TLS] Cert hash: \(hex)")
+        print("[TLS] Expected:  \(pinnedHex.lowercased())")
+        print("[TLS] Match: \(matches)")
+        return matches
     }
 }

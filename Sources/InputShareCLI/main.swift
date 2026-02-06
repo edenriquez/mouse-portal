@@ -102,7 +102,11 @@ if args.mode == "receive" {
         framed.start()
     }
 
+    listener.stateUpdateHandler = { state in
+        print("[Receiver] Listener state: \(state)")
+    }
     listener.start(queue: queue)
+    print("[Receiver] Listening on port \(args.port)...")
     dispatchMain()
 } else {
     let conn = try NWTransport.makeClientConnection(host: args.host!, port: args.port, tls: tls)
