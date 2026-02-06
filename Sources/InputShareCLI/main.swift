@@ -84,7 +84,14 @@ if args.mode == "receive" {
     let listener = try NWTransport.makeListener(port: args.port, tls: tls)
 
     listener.newConnectionHandler = { conn in
+        print("[Receiver] New connection from \(conn.endpoint)")
         let framed = NWFramedConnection(connection: conn, queue: queue)
+
+        // Log connection state changes
+        framed.onState = { state in
+            print("[Receiver] Connection state: \(state)")
+        }
+
         framed.onFrame = { data in
             guard let env = try? InputShareCodec.decodeEnvelope(data) else { return }
             if env.messageType == .inputEvent {
@@ -101,7 +108,13 @@ if args.mode == "receive" {
     let conn = try NWTransport.makeClientConnection(host: args.host!, port: args.port, tls: tls)
     let framed = NWFramedConnection(connection: conn, queue: queue)
 
+    // Log connection state changes
+    framed.onState = { state in
+        print("[Sender] Connection state: \(state)")
+    }
+
     framed.start()
+    print("[Sender] Connecting to \(args.host!):\(args.port)...")
 
     let capture = EventTapCapture(handler: { input in
         let payload = (try? InputShareCodec.encodePayload(input)) ?? Data()
