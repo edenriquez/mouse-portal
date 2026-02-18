@@ -74,6 +74,9 @@ public final class EventTapCapture {
 
         let events: [CGEventType] = [
             .mouseMoved,
+            .leftMouseDragged,
+            .rightMouseDragged,
+            .otherMouseDragged,
             .leftMouseDown,
             .leftMouseUp,
             .rightMouseDown,
@@ -106,7 +109,7 @@ public final class EventTapCapture {
 
             if unmanagedSelf.isSuppressing {
                 // During warmup, drop mouse-move events to discard warp-generated deltas
-                if type == .mouseMoved && unmanagedSelf.suppressionWarmup > 0 {
+                if EventTapCapture.isMouseMoveType(type) && unmanagedSelf.suppressionWarmup > 0 {
                     unmanagedSelf.suppressionWarmup -= 1
                     if unmanagedSelf.cursorHidden {
                         CGWarpMouseCursorPosition(unmanagedSelf.pinPoint)
@@ -115,7 +118,7 @@ public final class EventTapCapture {
                 }
 
                 // Track virtual cursor via deltas while real cursor is pinned
-                if type == .mouseMoved {
+                if EventTapCapture.isMouseMoveType(type) {
                     let dx = CGFloat(event.getDoubleValueField(.mouseEventDeltaX))
                     let dy = CGFloat(event.getDoubleValueField(.mouseEventDeltaY))
                     unmanagedSelf.virtualPosition.x += dx
@@ -140,7 +143,7 @@ public final class EventTapCapture {
             }
 
             // Normal (not suppressing) path
-            if type == .mouseMoved {
+            if EventTapCapture.isMouseMoveType(type) {
                 unmanagedSelf.onRawMouseMove?(event.location)
             }
 
@@ -181,7 +184,7 @@ public final class EventTapCapture {
         let flags = UInt64(event.flags.rawValue)
 
         switch type {
-        case .mouseMoved:
+        case .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
             let loc: CGPoint
             if isSuppressing {
                 loc = virtualPosition
@@ -226,6 +229,10 @@ public final class EventTapCapture {
         default:
             break
         }
+    }
+
+    private static func isMouseMoveType(_ type: CGEventType) -> Bool {
+        type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged
     }
 
     private func isSynthetic(event: CGEvent) -> Bool {

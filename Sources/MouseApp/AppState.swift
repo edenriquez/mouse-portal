@@ -363,6 +363,7 @@ public final class AppState {
     }
 
     private var receiverEventCount = 0
+    private var receiverButtonsDown: Set<MouseButton> = []
 
     private func handleReceiverFrame(_ data: Data) {
         guard let env = try? InputShareCodec.decodeEnvelope(data) else {
@@ -375,6 +376,7 @@ public final class AppState {
         case .activate:
             isInjecting = true
             receiverEventCount = 0
+            receiverButtonsDown.removeAll()
 
             // Place cursor on the left-edge display at proportional Y
             let activatePayload = try? InputShareCodec.decodePayload(ActivatePayload.self, from: env.payload)
@@ -432,15 +434,41 @@ public final class AppState {
                     print("[App] Injecting mouseMove #\(receiverEventCount) -> (\(Int(receiverCursorPos.x)), \(Int(receiverCursorPos.y)))")
                 }
 
+                // Pick the right event type: dragged when a button is held, moved otherwise
+                let moveType: CGEventType
+                let moveButton: CGMouseButton
+                if receiverButtonsDown.contains(.left) {
+                    moveType = .leftMouseDragged; moveButton = .left
+                } else if receiverButtonsDown.contains(.right) {
+                    moveType = .rightMouseDragged; moveButton = .right
+                } else if receiverButtonsDown.contains(.other) {
+                    moveType = .otherMouseDragged; moveButton = .center
+                } else {
+                    moveType = .mouseMoved; moveButton = .left
+                }
+
                 // Warp cursor and post synthetic event
                 CGWarpMouseCursorPosition(receiverCursorPos)
-                if let cg = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: receiverCursorPos, mouseButton: .left) {
+                if let cg = CGEvent(mouseEventSource: nil, mouseType: moveType, mouseCursorPosition: receiverCursorPos, mouseButton: moveButton) {
                     cg.flags = CGEventFlags(rawValue: UInt64(input.flags))
                     cg.setIntegerValueField(.eventSourceUserData, value: Int64(InputShareInjectionMarker.value))
                     cg.post(tap: .cghidEventTap)
                 }
 
                 returnEdgeDetector?.update(position: receiverCursorPos)
+            } else if input.kind == .mouseButton {
+                // Track button state for drag event generation
+                if let button = input.button, let state = input.buttonState {
+                    if state == .down {
+                        receiverButtonsDown.insert(button)
+                    } else {
+                        receiverButtonsDown.remove(button)
+                    }
+                }
+                if receiverEventCount <= 5 || receiverEventCount % 100 == 0 {
+                    print("[App] Injecting \(input.kind.rawValue) #\(receiverEventCount)")
+                }
+                injector?.inject(input)
             } else {
                 // Non-move events: use injector as before
                 if receiverEventCount <= 5 || receiverEventCount % 100 == 0 {
