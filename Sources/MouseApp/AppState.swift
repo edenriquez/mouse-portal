@@ -240,8 +240,16 @@ public final class AppState {
         let cap = EventTapCapture(handler: { [weak self] input in
             guard let self, self.stateMachine?.state == .forwarding else { return }
             if input.kind == .mouseMove {
-                // Coalesce mouse moves — only latest position matters
-                self.pendingMouseMove = input
+                // Coalesce mouse moves — accumulate deltas so none are lost
+                if var pending = self.pendingMouseMove {
+                    pending.mouseDeltaX = (pending.mouseDeltaX ?? 0) + (input.mouseDeltaX ?? 0)
+                    pending.mouseDeltaY = (pending.mouseDeltaY ?? 0) + (input.mouseDeltaY ?? 0)
+                    pending.normalizedPosition = input.normalizedPosition
+                    pending.flags = input.flags
+                    self.pendingMouseMove = pending
+                } else {
+                    self.pendingMouseMove = input
+                }
             } else {
                 // Flush any pending mouse move before sending non-move events
                 if let pending = self.pendingMouseMove {
