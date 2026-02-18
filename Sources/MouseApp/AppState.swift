@@ -48,6 +48,44 @@ public final class AppState {
         ensureAccessibility()
     }
 
+    /// Immediately restore local mouse/keyboard control regardless of current role.
+    /// Safe to call from either sender or receiver side, or even when not suppressing.
+    private func restoreLocalControl() {
+        print("[App] Restoring local control")
+        // Sender side
+        stopCoalesceTimer()
+        capture?.stopSuppressing()
+        capture?.stop()
+        capture = nil
+        stateMachine?.reset()
+        stateMachine = nil
+        edgeDetector = nil
+
+        // Receiver side
+        isInjecting = false
+        receiverTap?.stopSuppressing()
+        receiverTap?.stop()
+        receiverTap = nil
+        returnEdgeDetector = nil
+        injector = nil
+
+        // Connections
+        framedConnection?.cancel()
+        framedConnection = nil
+        incomingFramed?.cancel()
+        incomingFramed = nil
+
+        // Failsafe — ensure HID is re-associated no matter what
+        CGAssociateMouseAndMouseCursorPosition(1)
+        CGDisplayShowCursor(CGMainDisplayID())
+
+        DispatchQueue.main.async {
+            self.connectionStatus = .disconnected
+            self.forwardingState = .idle
+            self.pairedDeviceName = nil
+        }
+    }
+
     private func ensureAccessibility() {
         let opts = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
         let trusted = AXIsProcessTrustedWithOptions(opts)
@@ -102,8 +140,8 @@ public final class AppState {
                     print("[App] Connected to \(device.name)")
                     self?.startSenderCapture()
                 case .failed, .cancelled:
-                    self?.connectionStatus = .disconnected
-                    self?.pairedDeviceName = nil
+                    print("[App] Sender connection lost — restoring local control")
+                    self?.restoreLocalControl()
                 default:
                     break
                 }
@@ -120,25 +158,7 @@ public final class AppState {
     // MARK: - Disconnect
 
     public func disconnect() {
-        stopCoalesceTimer()
-        capture?.stop()
-        capture = nil
-        receiverTap?.stop()
-        receiverTap = nil
-        framedConnection?.cancel()
-        framedConnection = nil
-        incomingFramed?.cancel()
-        incomingFramed = nil
-        stateMachine?.reset()
-        stateMachine = nil
-        edgeDetector = nil
-        returnEdgeDetector = nil
-        isInjecting = false
-        DispatchQueue.main.async {
-            self.connectionStatus = .disconnected
-            self.forwardingState = .idle
-            self.pairedDeviceName = nil
-        }
+        restoreLocalControl()
     }
 
     // MARK: - Sender Setup
@@ -295,18 +315,8 @@ public final class AppState {
                     self?.connectionStatus = .connected
                     self?.pairedDeviceName = "Remote"
                 case .failed, .cancelled:
-                    // Restore local input — stop suppressing and clean up receiver state
-                    self?.isInjecting = false
-                    self?.receiverTap?.stopSuppressing()
-                    self?.receiverTap?.stop()
-                    self?.receiverTap = nil
-                    self?.returnEdgeDetector = nil
-                    self?.injector = nil
-                    self?.incomingFramed = nil
-                    if self?.framedConnection == nil {
-                        self?.connectionStatus = .disconnected
-                        self?.pairedDeviceName = nil
-                    }
+                    print("[App] Receiver connection lost — restoring local control")
+                    self?.restoreLocalControl()
                 default:
                     break
                 }
