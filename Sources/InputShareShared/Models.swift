@@ -82,6 +82,8 @@ public struct InputEvent: Codable, Sendable {
 
     public var kind: Kind
     public var normalizedPosition: NormalizedPoint?
+    public var mouseDeltaX: Double?
+    public var mouseDeltaY: Double?
     public var button: MouseButton?
     public var buttonState: ButtonState?
     public var scroll: ScrollDelta?
@@ -92,6 +94,8 @@ public struct InputEvent: Codable, Sendable {
     public init(
         kind: Kind,
         normalizedPosition: NormalizedPoint? = nil,
+        mouseDeltaX: Double? = nil,
+        mouseDeltaY: Double? = nil,
         button: MouseButton? = nil,
         buttonState: ButtonState? = nil,
         scroll: ScrollDelta? = nil,
@@ -101,6 +105,8 @@ public struct InputEvent: Codable, Sendable {
     ) {
         self.kind = kind
         self.normalizedPosition = normalizedPosition
+        self.mouseDeltaX = mouseDeltaX
+        self.mouseDeltaY = mouseDeltaY
         self.button = button
         self.buttonState = buttonState
         self.scroll = scroll

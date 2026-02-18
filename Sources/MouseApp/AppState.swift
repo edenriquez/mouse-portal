@@ -42,6 +42,10 @@ public final class AppState {
     // Y coordinate (in screen coords) where cursor crossed the edge
     private var crossingPosition: CGPoint = .zero
 
+    // Receiver cursor tracking — apply deltas instead of denormalizing
+    private var receiverCursorPos: CGPoint = .zero
+    private var receiverGeometry: ScreenGeometry?
+
     // Mouse move coalescing — only send latest position at fixed interval
     private var pendingMouseMove: InputEvent?
     private var coalesceTimer: DispatchSourceTimer?
@@ -71,6 +75,7 @@ public final class AppState {
         receiverTap = nil
         returnEdgeDetector = nil
         injector = nil
+        receiverGeometry = nil
 
         // Connections
         framedConnection?.cancel()
@@ -214,7 +219,7 @@ public final class AppState {
     }
 
     private func startSenderCapture() {
-        let geometry = ScreenGeometry.allDisplays()
+        let geometry = ScreenGeometry.allDisplays(log: true)
         print("[App] Screen bounds (all displays): \(geometry.bounds)")
 
         let edge = EdgeDetector(
@@ -269,8 +274,10 @@ public final class AppState {
         case .deactivate:
             // Read return Y from receiver
             if let deactPayload = try? InputShareCodec.decodePayload(DeactivatePayload.self, from: env.payload) {
+                // Denormalize return Y against the right-edge display
                 let geo = ScreenGeometry.allDisplays()
-                let returnY = geo.denormalize(x: 0, y: deactPayload.normalizedY).y
+                let edgeDisplay = geo.displayAtRightEdge()
+                let returnY = edgeDisplay.minY + CGFloat(deactPayload.normalizedY) * edgeDisplay.height
                 crossingPosition = CGPoint(x: geo.bounds.maxX, y: returnY)
                 print("[App] Received deactivate from receiver — returning at Y=\(Int(returnY))")
             } else {
@@ -291,7 +298,8 @@ public final class AppState {
         let framed = NWFramedConnection(connection: conn, queue: queue)
         incomingFramed = framed
 
-        let geometry = ScreenGeometry.allDisplays()
+        let geometry = ScreenGeometry.allDisplays(log: true)
+        self.receiverGeometry = geometry
         let injector = InputInjector(geometry: geometry)
         self.injector = injector
         print("[App] Receiver screen bounds (all displays): \(geometry.bounds)")
@@ -353,24 +361,25 @@ public final class AppState {
             print("[App] Failed to decode envelope")
             return
         }
-        let geometry = ScreenGeometry.allDisplays()
+        guard let geometry = receiverGeometry else { return }
 
         switch env.messageType {
         case .activate:
             isInjecting = true
             receiverEventCount = 0
 
-            // Read the crossing Y from sender
+            // Place cursor on the left-edge display at proportional Y
             let activatePayload = try? InputShareCodec.decodePayload(ActivatePayload.self, from: env.payload)
             let normY = activatePayload?.normalizedPosition.y ?? 0.5
-            let cursorY = geometry.denormalize(x: 0, y: normY).y
-            print("[App] Received activate — placing cursor at left edge Y=\(Int(cursorY))")
+            let leftDisplay = geometry.displayAtLeftEdge()
+            let cursorY = leftDisplay.minY + CGFloat(normY) * leftDisplay.height
+            let startPos = CGPoint(x: leftDisplay.minX + 2, y: cursorY)
+            receiverCursorPos = startPos
+            print("[App] Received activate — placing cursor at left edge Y=\(Int(cursorY)) (leftDisplay=\(Int(leftDisplay.width))x\(Int(leftDisplay.height)) at Y=\(Int(leftDisplay.minY)))")
 
             // Suppress local trackpad/mouse — keep cursor visible (controlled remotely)
             receiverTap?.startSuppressing(virtualStart: .zero, hideCursor: false)
-
-            // Place cursor at left edge of receiver's screen at matching Y
-            CGWarpMouseCursorPosition(CGPoint(x: geometry.bounds.minX + 2, y: cursorY))
+            CGWarpMouseCursorPosition(startPos)
 
             // Arm return edge — cursor must leave the edge before return can trigger
             returnEdgeDetector?.armAfterEntry()
@@ -379,7 +388,6 @@ public final class AppState {
                 self.connectionStatus = .forwarding
                 self.forwardingState = .forwarding
             }
-            // Send activated ack
             let ack = MessageEnvelope(
                 protocolVersion: InputShareCodec.protocolVersion,
                 messageType: .activated,
@@ -400,19 +408,37 @@ public final class AppState {
                 return
             }
             receiverEventCount += 1
-            if receiverEventCount <= 5 || receiverEventCount % 100 == 0 {
-                if input.kind == .mouseMove, let pos = input.normalizedPosition {
-                    let pt = geometry.denormalize(x: pos.x, y: pos.y)
-                    print("[App] Injecting mouseMove #\(receiverEventCount) -> (\(Int(pt.x)), \(Int(pt.y)))")
-                } else {
+
+            if input.kind == .mouseMove {
+                // Apply raw pixel deltas — no normalization/denormalization needed
+                if let dx = input.mouseDeltaX, let dy = input.mouseDeltaY {
+                    receiverCursorPos.x += CGFloat(dx)
+                    receiverCursorPos.y += CGFloat(dy)
+                    // Clamp to virtual screen bounds
+                    let b = geometry.bounds
+                    receiverCursorPos.x = max(b.minX, min(receiverCursorPos.x, b.maxX))
+                    receiverCursorPos.y = max(b.minY, min(receiverCursorPos.y, b.maxY))
+                }
+
+                if receiverEventCount <= 5 || receiverEventCount % 100 == 0 {
+                    print("[App] Injecting mouseMove #\(receiverEventCount) -> (\(Int(receiverCursorPos.x)), \(Int(receiverCursorPos.y)))")
+                }
+
+                // Warp cursor and post synthetic event
+                CGWarpMouseCursorPosition(receiverCursorPos)
+                if let cg = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: receiverCursorPos, mouseButton: .left) {
+                    cg.flags = CGEventFlags(rawValue: UInt64(input.flags))
+                    cg.setIntegerValueField(.eventSourceUserData, value: Int64(InputShareInjectionMarker.value))
+                    cg.post(tap: .cghidEventTap)
+                }
+
+                returnEdgeDetector?.update(position: receiverCursorPos)
+            } else {
+                // Non-move events: use injector as before
+                if receiverEventCount <= 5 || receiverEventCount % 100 == 0 {
                     print("[App] Injecting \(input.kind.rawValue) #\(receiverEventCount)")
                 }
-            }
-            injector?.inject(input)
-
-            if input.kind == .mouseMove, let pos = input.normalizedPosition {
-                let pt = geometry.denormalize(x: pos.x, y: pos.y)
-                returnEdgeDetector?.update(position: pt)
+                injector?.inject(input)
             }
 
         case .deactivate:
@@ -483,9 +509,12 @@ public final class AppState {
     }
 
     private func sendActivate() {
+        // Normalize Y against the display at the right edge, not the full virtual screen.
+        // This ensures the Y maps correctly regardless of how the other machine's displays are arranged.
         let geo = ScreenGeometry.allDisplays()
-        let normY = geo.normalize(point: crossingPosition).y
-        print("[App] Sending activate to receiver (normY=\(String(format: "%.3f", normY)))...")
+        let edgeDisplay = geo.displayAtRightEdge()
+        let normY = (crossingPosition.y - edgeDisplay.minY) / edgeDisplay.height
+        print("[App] Sending activate to receiver (normY=\(String(format: "%.3f", normY)), edgeDisplay=\(Int(edgeDisplay.width))x\(Int(edgeDisplay.height)))...")
         let payload = (try? InputShareCodec.encodePayload(ActivatePayload(normalizedPosition: NormalizedPoint(x: 0.0, y: normY)))) ?? Data()
         let env = MessageEnvelope(
             protocolVersion: InputShareCodec.protocolVersion,
@@ -516,8 +545,10 @@ public final class AppState {
     }
 
     private func sendDeactivateOnIncoming() {
-        let geo = ScreenGeometry.allDisplays()
-        let normY = geo.normalize(point: crossingPosition).y
+        // Normalize return Y against the left-edge display
+        let geo = receiverGeometry ?? ScreenGeometry.allDisplays()
+        let leftDisplay = geo.displayAtLeftEdge()
+        let normY = (crossingPosition.y - leftDisplay.minY) / leftDisplay.height
         print("[App] Sending deactivate (return) to sender (normY=\(String(format: "%.3f", normY))), restoring local input...")
         receiverTap?.stopSuppressing()
         let payload = (try? InputShareCodec.encodePayload(DeactivatePayload(normalizedY: normY))) ?? Data()

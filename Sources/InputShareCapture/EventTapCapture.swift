@@ -172,7 +172,9 @@ public final class EventTapCapture {
                 loc = event.location
             }
             let n = geometry.normalize(point: loc)
-            let e = InputEvent(kind: .mouseMove, normalizedPosition: NormalizedPoint(x: n.x, y: n.y), flags: flags)
+            let dx = event.getDoubleValueField(.mouseEventDeltaX)
+            let dy = event.getDoubleValueField(.mouseEventDeltaY)
+            let e = InputEvent(kind: .mouseMove, normalizedPosition: NormalizedPoint(x: n.x, y: n.y), mouseDeltaX: dx, mouseDeltaY: dy, flags: flags)
             queue.async { self.handler(e) }
 
         case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseDown, .otherMouseUp:
