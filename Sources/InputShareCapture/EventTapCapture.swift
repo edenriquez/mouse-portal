@@ -11,7 +11,7 @@ public final class EventTapCapture {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    /// True when cursor is frozen/hidden and events are swallowed locally.
+    /// True when local HID events are swallowed by the event tap.
     public private(set) var isSuppressing: Bool = false
 
     /// Fires raw screen position on every mouse move before normalization.
@@ -20,21 +20,32 @@ public final class EventTapCapture {
 
     /// Virtual cursor position tracked via deltas when suppressing
     private var virtualPosition: CGPoint = .zero
+    private var cursorHidden: Bool = false
 
-    /// Begin suppressing: freeze + hide real cursor, track virtual cursor from `virtualStart`.
-    public func startSuppressing(virtualStart: CGPoint) {
+    /// Begin suppressing: freeze cursor from HID, optionally hide it,
+    /// track a virtual cursor from `virtualStart` for position events.
+    /// - Parameters:
+    ///   - virtualStart: Starting point of the virtual cursor in screen coordinates.
+    ///   - hideCursor: If true (sender), hides the cursor. If false (receiver), cursor stays visible.
+    public func startSuppressing(virtualStart: CGPoint, hideCursor: Bool = true) {
         guard !isSuppressing else { return }
         virtualPosition = virtualStart
         isSuppressing = true
         CGAssociateMouseAndMouseCursorPosition(0)
-        CGDisplayHideCursor(CGMainDisplayID())
+        if hideCursor {
+            CGDisplayHideCursor(CGMainDisplayID())
+            cursorHidden = true
+        }
     }
 
-    /// Stop suppressing: show real cursor and reconnect to HID.
+    /// Stop suppressing: restore HID association and show cursor if it was hidden.
     public func stopSuppressing() {
         guard isSuppressing else { return }
         isSuppressing = false
-        CGDisplayShowCursor(CGMainDisplayID())
+        if cursorHidden {
+            CGDisplayShowCursor(CGMainDisplayID())
+            cursorHidden = false
+        }
         CGAssociateMouseAndMouseCursorPosition(1)
     }
 

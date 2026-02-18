@@ -25,7 +25,8 @@ public final class AppState {
 
     private let browser = BonjourBrowser()
     private var advertiser: BonjourAdvertiser?
-    private var capture: EventTapCapture?
+    private var capture: EventTapCapture?          // sender-side: captures + forwards events
+    private var receiverTap: EventTapCapture?       // receiver-side: suppresses local input
     private var injector: InputInjector?
     private var edgeDetector: EdgeDetector?
     private var returnEdgeDetector: EdgeDetector?
@@ -116,6 +117,8 @@ public final class AppState {
     public func disconnect() {
         capture?.stop()
         capture = nil
+        receiverTap?.stop()
+        receiverTap = nil
         framedConnection?.cancel()
         framedConnection = nil
         incomingFramed?.cancel()
@@ -242,6 +245,16 @@ public final class AppState {
         let injector = InputInjector(geometry: geometry)
         self.injector = injector
 
+        // Create event tap on receiver to suppress local input while being controlled
+        let tap = EventTapCapture(handler: { _ in }, geometry: geometry)
+        do {
+            try tap.start()
+            receiverTap = tap
+            print("[App] Receiver event tap started")
+        } catch {
+            print("[App] Failed to start receiver event tap: \(error)")
+        }
+
         let returnEdge = EdgeDetector(
             trigger: EdgeTrigger(zone: .topLeft),
             screenWidth: geometry.bounds.width,
@@ -293,13 +306,15 @@ public final class AppState {
 
         switch env.messageType {
         case .activate:
-            print("[App] Received activate — warping cursor to top-left, now injecting")
+            print("[App] Received activate — suppressing local input, warping cursor to top-left")
             isInjecting = true
             receiverEventCount = 0
 
+            // Suppress local trackpad/mouse — keep cursor visible (controlled remotely)
+            receiverTap?.startSuppressing(virtualStart: .zero, hideCursor: false)
+
             // Place cursor at top-left (sender is forwarding from top-right)
             CGWarpMouseCursorPosition(CGPoint(x: 20, y: 20))
-            CGAssociateMouseAndMouseCursorPosition(1)
 
             // Arm return edge — cursor must leave the corner before return can trigger
             returnEdgeDetector?.armAfterEntry()
@@ -345,8 +360,9 @@ public final class AppState {
             }
 
         case .deactivate:
-            print("[App] Received deactivate — stopping injection")
+            print("[App] Received deactivate — restoring local input")
             isInjecting = false
+            receiverTap?.stopSuppressing()
             DispatchQueue.main.async {
                 self.connectionStatus = .connected
                 self.forwardingState = .idle
@@ -417,7 +433,8 @@ public final class AppState {
     }
 
     private func sendDeactivateOnIncoming() {
-        print("[App] Sending deactivate (return) to sender...")
+        print("[App] Sending deactivate (return) to sender, restoring local input...")
+        receiverTap?.stopSuppressing()
         let env = MessageEnvelope(
             protocolVersion: InputShareCodec.protocolVersion,
             messageType: .deactivate,
