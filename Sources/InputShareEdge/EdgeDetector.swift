@@ -30,17 +30,15 @@ public final class EdgeDetector: @unchecked Sendable {
     public var onEdgeEvent: ((EdgeEvent) -> Void)?
 
     private let trigger: EdgeTrigger
-    private let screenWidth: CGFloat
-    private let screenHeight: CGFloat
+    private let screenBounds: CGRect
     private var isInZone = false
     private var dwellTimer: DispatchWorkItem?
     private var hasTriggered = false
     private let queue: DispatchQueue
 
-    public init(trigger: EdgeTrigger, screenWidth: CGFloat, screenHeight: CGFloat, queue: DispatchQueue = .main) {
+    public init(trigger: EdgeTrigger, screenBounds: CGRect, queue: DispatchQueue = .main) {
         self.trigger = trigger
-        self.screenWidth = screenWidth
-        self.screenHeight = screenHeight
+        self.screenBounds = screenBounds
         self.queue = queue
     }
 
@@ -64,8 +62,7 @@ public final class EdgeDetector: @unchecked Sendable {
     }
 
     /// Mark the detector as "already in zone" so the cursor must leave and
-    /// re-enter before the next trigger fires. Call this after warping the
-    /// cursor near the corner to prevent an immediate re-trigger.
+    /// re-enter before the next trigger fires.
     public func armAfterEntry() {
         isInZone = true
         hasTriggered = false
@@ -76,9 +73,9 @@ public final class EdgeDetector: @unchecked Sendable {
         let t = trigger.enterThreshold
         switch trigger.zone {
         case .topRight:
-            return pos.x >= screenWidth - t && pos.y <= t
+            return pos.x >= screenBounds.maxX - t && pos.y <= screenBounds.minY + t
         case .topLeft:
-            return pos.x <= t && pos.y <= t
+            return pos.x <= screenBounds.minX + t && pos.y <= screenBounds.minY + t
         }
     }
 
@@ -86,9 +83,9 @@ public final class EdgeDetector: @unchecked Sendable {
         let t = trigger.exitThreshold
         switch trigger.zone {
         case .topRight:
-            return pos.x < screenWidth - t || pos.y > t
+            return pos.x < screenBounds.maxX - t || pos.y > screenBounds.minY + t
         case .topLeft:
-            return pos.x > t || pos.y > t
+            return pos.x > screenBounds.minX + t || pos.y > screenBounds.minY + t
         }
     }
 

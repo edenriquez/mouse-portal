@@ -39,6 +39,11 @@ public final class AppState {
     private let seq = Sequencer()
     private let deviceId = Host.current().localizedName ?? UUID().uuidString
 
+    // Mouse move coalescing — only send latest position at fixed interval
+    private var pendingMouseMove: InputEvent?
+    private var coalesceTimer: DispatchSourceTimer?
+    private static let coalesceInterval: TimeInterval = 0.008  // ~125 Hz
+
     public init() {
         ensureAccessibility()
     }
@@ -83,7 +88,7 @@ public final class AppState {
         connectionStatus = .connecting
         pairedDeviceName = device.name
 
-        let conn = NWConnection(to: device.endpoint, using: .tcp)
+        let conn = NWConnection(to: device.endpoint, using: NWTransport.tcpParameters)
         let framed = NWFramedConnection(connection: conn, queue: queue)
         framedConnection = framed
 
@@ -115,6 +120,7 @@ public final class AppState {
     // MARK: - Disconnect
 
     public func disconnect() {
+        stopCoalesceTimer()
         capture?.stop()
         capture = nil
         receiverTap?.stop()
@@ -148,14 +154,16 @@ public final class AppState {
             if newState == .forwarding {
                 // Virtual cursor starts at top-left (maps to receiver's top-left)
                 self.capture?.startSuppressing(virtualStart: CGPoint(x: 20, y: 20))
+                self.startCoalesceTimer()
             } else if newState == .idle {
                 let wasSuppressing = self.capture?.isSuppressing == true
                 self.capture?.stopSuppressing()
+                self.stopCoalesceTimer()
 
                 if wasSuppressing {
-                    // Returning from forwarding — place cursor near top-right
-                    let geo = ScreenGeometry.mainDisplay()
-                    let returnPos = CGPoint(x: geo.bounds.width - 20, y: 20)
+                    // Returning from forwarding — place cursor near top-right of full virtual screen
+                    let geo = ScreenGeometry.allDisplays()
+                    let returnPos = CGPoint(x: geo.bounds.maxX - 20, y: geo.bounds.minY + 20)
                     CGWarpMouseCursorPosition(returnPos)
                     // Arm edge so it doesn't re-trigger until user leaves the corner
                     self.edgeDetector?.armAfterEntry()
@@ -182,13 +190,12 @@ public final class AppState {
     }
 
     private func startSenderCapture() {
-        let geometry = ScreenGeometry.mainDisplay()
-        print("[App] Screen bounds: \(geometry.bounds)")
+        let geometry = ScreenGeometry.allDisplays()
+        print("[App] Screen bounds (all displays): \(geometry.bounds)")
 
         let edge = EdgeDetector(
             trigger: EdgeTrigger(zone: .topRight),
-            screenWidth: geometry.bounds.width,
-            screenHeight: geometry.bounds.height,
+            screenBounds: geometry.bounds,
             queue: queue
         )
         edgeDetector = edge
@@ -202,7 +209,17 @@ public final class AppState {
 
         let cap = EventTapCapture(handler: { [weak self] input in
             guard let self, self.stateMachine?.state == .forwarding else { return }
-            self.sendInputEvent(input)
+            if input.kind == .mouseMove {
+                // Coalesce mouse moves — only latest position matters
+                self.pendingMouseMove = input
+            } else {
+                // Flush any pending mouse move before sending non-move events
+                if let pending = self.pendingMouseMove {
+                    self.pendingMouseMove = nil
+                    self.sendInputEvent(pending)
+                }
+                self.sendInputEvent(input)
+            }
         }, geometry: geometry)
 
         cap.onRawMouseMove = { [weak self] point in
@@ -241,9 +258,10 @@ public final class AppState {
         let framed = NWFramedConnection(connection: conn, queue: queue)
         incomingFramed = framed
 
-        let geometry = ScreenGeometry.mainDisplay()
+        let geometry = ScreenGeometry.allDisplays()
         let injector = InputInjector(geometry: geometry)
         self.injector = injector
+        print("[App] Receiver screen bounds (all displays): \(geometry.bounds)")
 
         // Create event tap on receiver to suppress local input while being controlled
         let tap = EventTapCapture(handler: { _ in }, geometry: geometry)
@@ -257,8 +275,7 @@ public final class AppState {
 
         let returnEdge = EdgeDetector(
             trigger: EdgeTrigger(zone: .topLeft),
-            screenWidth: geometry.bounds.width,
-            screenHeight: geometry.bounds.height,
+            screenBounds: geometry.bounds,
             queue: queue
         )
         returnEdgeDetector = returnEdge
@@ -302,7 +319,7 @@ public final class AppState {
             print("[App] Failed to decode envelope")
             return
         }
-        let geometry = ScreenGeometry.mainDisplay()
+        let geometry = ScreenGeometry.allDisplays()
 
         switch env.messageType {
         case .activate:
@@ -381,6 +398,31 @@ public final class AppState {
 
         default:
             break
+        }
+    }
+
+    // MARK: - Mouse Move Coalescing
+
+    private func startCoalesceTimer() {
+        stopCoalesceTimer()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now(), repeating: Self.coalesceInterval)
+        timer.setEventHandler { [weak self] in
+            guard let self, let pending = self.pendingMouseMove else { return }
+            self.pendingMouseMove = nil
+            self.sendInputEvent(pending)
+        }
+        coalesceTimer = timer
+        timer.resume()
+    }
+
+    private func stopCoalesceTimer() {
+        coalesceTimer?.cancel()
+        coalesceTimer = nil
+        // Flush any remaining pending move
+        if let pending = pendingMouseMove {
+            pendingMouseMove = nil
+            sendInputEvent(pending)
         }
     }
 

@@ -144,11 +144,10 @@ if args.mode == "receive" {
     let injector = InputInjector()
     let listener = try NWTransport.makeListener(port: args.port)
 
-    let geometry = ScreenGeometry.mainDisplay()
+    let geometry = ScreenGeometry.allDisplays()
     let returnEdge = EdgeDetector(
         trigger: EdgeTrigger(zone: .topLeft),
-        screenWidth: geometry.bounds.width,
-        screenHeight: geometry.bounds.height,
+        screenBounds: geometry.bounds,
         queue: queue
     )
 
@@ -245,12 +244,11 @@ ensureAccessibilityPrompt()
 let conn = NWTransport.makeClientConnection(host: args.host!, port: args.port)
 let framed = NWFramedConnection(connection: conn, queue: queue)
 
-let geometry = ScreenGeometry.mainDisplay()
+let geometry = ScreenGeometry.allDisplays()
 print("[Sender] Screen bounds: \(geometry.bounds)")
 let edgeDetector = EdgeDetector(
     trigger: EdgeTrigger(zone: .topRight),
-    screenWidth: geometry.bounds.width,
-    screenHeight: geometry.bounds.height,
+    screenBounds: geometry.bounds,
     queue: queue
 )
 let stateMachine = ForwardingStateMachine(queue: queue)
@@ -266,8 +264,8 @@ stateMachine.onStateChange = { newState in
         let wasSuppressing = capture.isSuppressing
         capture.stopSuppressing()
         if wasSuppressing {
-            let geo = ScreenGeometry.mainDisplay()
-            CGWarpMouseCursorPosition(CGPoint(x: geo.bounds.width - 20, y: 20))
+            let geo = ScreenGeometry.allDisplays()
+            CGWarpMouseCursorPosition(CGPoint(x: geo.bounds.maxX - 20, y: geo.bounds.minY + 20))
             edgeDetector.armAfterEntry()
         }
     default:

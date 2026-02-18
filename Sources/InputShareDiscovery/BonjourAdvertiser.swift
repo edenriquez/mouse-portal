@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import InputShareTransport
 
 public final class BonjourAdvertiser {
     private var listener: NWListener?
@@ -15,7 +16,7 @@ public final class BonjourAdvertiser {
     }
 
     public func start() throws {
-        let params = NWParameters.tcp
+        let params = NWTransport.tcpParameters
         let listener = try NWListener(using: params, on: NWEndpoint.Port(rawValue: port)!)
         listener.service = NWListener.Service(name: nil, type: "_inputshare._tcp")
 

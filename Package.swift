@@ -23,7 +23,7 @@ let package = Package(
         .target(name: "InputShareCapture", dependencies: ["InputShareShared"]),
         .target(name: "InputShareInjection", dependencies: ["InputShareShared", "InputShareCapture"]),
         .target(name: "InputShareEdge", dependencies: ["InputShareShared", "InputShareCapture"]),
-        .target(name: "InputShareDiscovery", dependencies: ["InputShareShared"]),
+        .target(name: "InputShareDiscovery", dependencies: ["InputShareShared", "InputShareTransport"]),
         .executableTarget(
             name: "InputShareCLI",
             dependencies: [
