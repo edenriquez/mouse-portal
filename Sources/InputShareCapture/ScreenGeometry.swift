@@ -23,10 +23,19 @@ public struct ScreenGeometry {
 
         guard count > 0 else { return mainDisplay() }
 
+        let mainID = CGMainDisplayID()
+        for i in 0..<Int(count) {
+            let id = displayIDs[i]
+            let b = CGDisplayBounds(id)
+            let isMain = (id == mainID)
+            print("[Screen] Display \(i): \(Int(b.width))x\(Int(b.height)) at (\(Int(b.origin.x)), \(Int(b.origin.y)))\(isMain ? " [main]" : "")")
+        }
+
         var union = CGDisplayBounds(displayIDs[0])
         for i in 1..<Int(count) {
             union = union.union(CGDisplayBounds(displayIDs[i]))
         }
+        print("[Screen] Virtual screen: \(Int(union.width))x\(Int(union.height)) at (\(Int(union.origin.x)), \(Int(union.origin.y))) → maxX=\(Int(union.maxX)), maxY=\(Int(union.maxY))")
         return ScreenGeometry(bounds: union)
     }
 

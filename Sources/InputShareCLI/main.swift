@@ -189,8 +189,8 @@ if args.mode == "receive" {
                 print("[Receiver] Received activate — warping to top-left, now injecting")
                 isInjecting = true
 
-                // Place cursor at top-left
-                CGWarpMouseCursorPosition(CGPoint(x: 20, y: 20))
+                // Place cursor at top-left of virtual screen
+                CGWarpMouseCursorPosition(CGPoint(x: geometry.bounds.minX + 20, y: geometry.bounds.minY + 20))
                 CGAssociateMouseAndMouseCursorPosition(1)
                 // Arm return edge — must leave corner before return can trigger
                 returnEdge.armAfterEntry()
@@ -259,7 +259,8 @@ stateMachine.onStateChange = { newState in
     print("[Sender] State: \(newState.rawValue)")
     switch newState {
     case .forwarding:
-        capture.startSuppressing(virtualStart: CGPoint(x: 20, y: 20))
+        let geo = ScreenGeometry.allDisplays()
+        capture.startSuppressing(virtualStart: CGPoint(x: geo.bounds.minX + 20, y: geo.bounds.minY + 20))
     case .idle:
         let wasSuppressing = capture.isSuppressing
         capture.stopSuppressing()

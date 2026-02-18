@@ -172,8 +172,10 @@ public final class AppState {
             print("[App] Forwarding state -> \(newState.rawValue)")
 
             if newState == .forwarding {
-                // Virtual cursor starts at top-left (maps to receiver's top-left)
-                self.capture?.startSuppressing(virtualStart: CGPoint(x: 20, y: 20))
+                // Virtual cursor starts at top-left of virtual screen (maps to receiver's top-left)
+                let geo = ScreenGeometry.allDisplays()
+                let startPos = CGPoint(x: geo.bounds.minX + 20, y: geo.bounds.minY + 20)
+                self.capture?.startSuppressing(virtualStart: startPos)
                 self.startCoalesceTimer()
             } else if newState == .idle {
                 let wasSuppressing = self.capture?.isSuppressing == true
@@ -348,8 +350,9 @@ public final class AppState {
             // Suppress local trackpad/mouse — keep cursor visible (controlled remotely)
             receiverTap?.startSuppressing(virtualStart: .zero, hideCursor: false)
 
-            // Place cursor at top-left (sender is forwarding from top-right)
-            CGWarpMouseCursorPosition(CGPoint(x: 20, y: 20))
+            // Place cursor at top-left of receiver's virtual screen
+            let recGeo = ScreenGeometry.allDisplays()
+            CGWarpMouseCursorPosition(CGPoint(x: recGeo.bounds.minX + 20, y: recGeo.bounds.minY + 20))
 
             // Arm return edge — cursor must leave the corner before return can trigger
             returnEdgeDetector?.armAfterEntry()

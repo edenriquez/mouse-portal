@@ -101,8 +101,9 @@ public final class EventTapCapture {
                     let dy = CGFloat(event.getDoubleValueField(.mouseEventDeltaY))
                     unmanagedSelf.virtualPosition.x += dx
                     unmanagedSelf.virtualPosition.y += dy
-                    unmanagedSelf.virtualPosition.x = max(0, min(unmanagedSelf.virtualPosition.x, unmanagedSelf.geometry.bounds.width))
-                    unmanagedSelf.virtualPosition.y = max(0, min(unmanagedSelf.virtualPosition.y, unmanagedSelf.geometry.bounds.height))
+                    let b = unmanagedSelf.geometry.bounds
+                    unmanagedSelf.virtualPosition.x = max(b.minX, min(unmanagedSelf.virtualPosition.x, b.maxX))
+                    unmanagedSelf.virtualPosition.y = max(b.minY, min(unmanagedSelf.virtualPosition.y, b.maxY))
                     unmanagedSelf.onRawMouseMove?(unmanagedSelf.virtualPosition)
                 }
 
