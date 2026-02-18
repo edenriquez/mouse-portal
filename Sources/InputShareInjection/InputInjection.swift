@@ -16,7 +16,6 @@ public final class InputInjector {
             if let p = event.normalizedPosition {
                 let pt = geometry.denormalize(x: p.x, y: p.y)
                 CGWarpMouseCursorPosition(pt)
-                CGAssociateMouseAndMouseCursorPosition(1)
 
                 if let cg = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: pt, mouseButton: .left) {
                     cg.flags = CGEventFlags(rawValue: UInt64(event.flags))

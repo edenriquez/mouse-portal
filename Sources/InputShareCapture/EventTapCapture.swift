@@ -21,6 +21,8 @@ public final class EventTapCapture {
     /// Virtual cursor position tracked via deltas when suppressing
     private var virtualPosition: CGPoint = .zero
     private var cursorHidden: Bool = false
+    /// Center of screen — cursor gets warped here on every local event to keep it pinned
+    private var pinPoint: CGPoint = .zero
 
     /// Begin suppressing: freeze cursor from HID, optionally hide it,
     /// track a virtual cursor from `virtualStart` for position events.
@@ -30,8 +32,10 @@ public final class EventTapCapture {
     public func startSuppressing(virtualStart: CGPoint, hideCursor: Bool = true) {
         guard !isSuppressing else { return }
         virtualPosition = virtualStart
+        pinPoint = CGPoint(x: geometry.bounds.midX, y: geometry.bounds.midY)
         isSuppressing = true
         CGAssociateMouseAndMouseCursorPosition(0)
+        CGWarpMouseCursorPosition(pinPoint)
         if hideCursor {
             CGDisplayHideCursor(CGMainDisplayID())
             cursorHidden = true
@@ -90,29 +94,33 @@ public final class EventTapCapture {
                 return Unmanaged.passUnretained(event)
             }
 
-            // Fire raw mouse position before any processing
-            if type == .mouseMoved {
-                if unmanagedSelf.isSuppressing {
-                    // Track virtual cursor via deltas while real cursor is frozen
+            if unmanagedSelf.isSuppressing {
+                // Track virtual cursor via deltas while real cursor is pinned
+                if type == .mouseMoved {
                     let dx = CGFloat(event.getDoubleValueField(.mouseEventDeltaX))
                     let dy = CGFloat(event.getDoubleValueField(.mouseEventDeltaY))
                     unmanagedSelf.virtualPosition.x += dx
                     unmanagedSelf.virtualPosition.y += dy
-                    // Clamp to screen bounds
                     unmanagedSelf.virtualPosition.x = max(0, min(unmanagedSelf.virtualPosition.x, unmanagedSelf.geometry.bounds.width))
                     unmanagedSelf.virtualPosition.y = max(0, min(unmanagedSelf.virtualPosition.y, unmanagedSelf.geometry.bounds.height))
                     unmanagedSelf.onRawMouseMove?(unmanagedSelf.virtualPosition)
-                } else {
-                    unmanagedSelf.onRawMouseMove?(event.location)
                 }
+
+                unmanagedSelf.handle(event: event, type: type)
+
+                // Warp real cursor back to center — reliable way to pin it
+                CGWarpMouseCursorPosition(unmanagedSelf.pinPoint)
+
+                // Swallow the event so apps don't see it
+                return nil
+            }
+
+            // Normal (not suppressing) path
+            if type == .mouseMoved {
+                unmanagedSelf.onRawMouseMove?(event.location)
             }
 
             unmanagedSelf.handle(event: event, type: type)
-
-            // When suppressing, swallow the event
-            if unmanagedSelf.isSuppressing {
-                return nil
-            }
             return Unmanaged.passUnretained(event)
         }
 
