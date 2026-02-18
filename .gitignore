@@ -5,7 +5,7 @@
 *.swiftsourceinfo
 *.o
 *.d
-
+*.mcp.json
 # Xcode
 *.xcodeproj
 *.xcworkspace
