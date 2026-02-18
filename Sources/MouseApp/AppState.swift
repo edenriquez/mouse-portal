@@ -454,7 +454,8 @@ public final class AppState {
 
     // Update devices from browser
     public func refreshDevices() {
-        discoveredDevices = browser.devices
+        let localName = Host.current().localizedName ?? ""
+        discoveredDevices = browser.devices.filter { $0.name != localName }
     }
 }
 
