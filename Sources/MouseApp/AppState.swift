@@ -295,6 +295,14 @@ public final class AppState {
                     self?.connectionStatus = .connected
                     self?.pairedDeviceName = "Remote"
                 case .failed, .cancelled:
+                    // Restore local input — stop suppressing and clean up receiver state
+                    self?.isInjecting = false
+                    self?.receiverTap?.stopSuppressing()
+                    self?.receiverTap?.stop()
+                    self?.receiverTap = nil
+                    self?.returnEdgeDetector = nil
+                    self?.injector = nil
+                    self?.incomingFramed = nil
                     if self?.framedConnection == nil {
                         self?.connectionStatus = .disconnected
                         self?.pairedDeviceName = nil
