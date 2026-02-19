@@ -8,6 +8,8 @@ public final class NWFramedConnection {
 
     public var onFrame: ((Data) -> Void)?
     public var onState: ((NWConnection.State) -> Void)?
+    /// Fires when the receive loop ends (remote closed or error). More immediate than onState for disconnect detection.
+    public var onDisconnected: (() -> Void)?
 
     public init(connection: NWConnection, queue: DispatchQueue) {
         self.connection = connection
@@ -46,6 +48,7 @@ public final class NWFramedConnection {
             }
 
             if error != nil || isComplete {
+                self.onDisconnected?()
                 return
             }
 

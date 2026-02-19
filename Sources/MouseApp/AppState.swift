@@ -42,6 +42,7 @@ public final class AppState {
     private var framedConnection: NWFramedConnection?
     private var incomingFramed: NWFramedConnection?
     private var isInjecting = false
+    private var isRestoringControl = false
 
     private let queue = DispatchQueue(label: "inputshare.app")
     private let seq = Sequencer()
@@ -74,6 +75,9 @@ public final class AppState {
     /// Immediately restore local mouse/keyboard control regardless of current role.
     /// Safe to call from either sender or receiver side, or even when not suppressing.
     private func restoreLocalControl() {
+        guard !isRestoringControl else { return }
+        isRestoringControl = true
+        defer { isRestoringControl = false }
         print("[App] Restoring local control")
         // Sender side
         stopCoalesceTimer()
@@ -181,6 +185,11 @@ public final class AppState {
 
         framed.onFrame = { [weak self] data in
             self?.handleSenderFrame(data)
+        }
+
+        framed.onDisconnected = { [weak self] in
+            print("[App] Sender connection receive ended — restoring local control")
+            self?.restoreLocalControl()
         }
 
         framed.start()
@@ -430,6 +439,11 @@ public final class AppState {
 
         framed.onFrame = { [weak self] data in
             self?.handleReceiverFrame(data)
+        }
+
+        framed.onDisconnected = { [weak self] in
+            print("[App] Receiver connection receive ended — restoring local control")
+            self?.restoreLocalControl()
         }
 
         framed.start()
