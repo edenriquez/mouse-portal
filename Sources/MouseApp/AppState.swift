@@ -45,12 +45,12 @@ public final class AppState {
     /// Real-time cursor velocity in px/s, exposed for Physics Lab stats display.
     public var cursorVelocity: CGFloat = 0
 
-    /// Called on main queue with (proximity, isRightEdge, edgeX, velocity) to drive glow panel.
+    /// Called on main queue with (proximity, isRightEdge, edgeX, velocity, blurIntensity) to drive glow panel.
     /// edgeX is the X coordinate of the screen boundary edge (used to find the correct NSScreen).
     /// velocity is 0...1 normalized edge-ward velocity.
-    public var onEdgeGlowUpdate: ((_ proximity: CGFloat, _ rightEdge: Bool, _ edgeX: CGFloat, _ velocity: CGFloat) -> Void)?
+    public var onEdgeGlowUpdate: ((_ proximity: CGFloat, _ rightEdge: Bool, _ edgeX: CGFloat, _ velocity: CGFloat, _ blurIntensity: CGFloat) -> Void)?
     /// Called on main queue when transition triggers — drives portal snap flash.
-    public var onPortalSnap: ((_ rightEdge: Bool, _ edgeX: CGFloat) -> Void)?
+    public var onPortalSnap: ((_ rightEdge: Bool, _ edgeX: CGFloat, _ blurIntensity: CGFloat) -> Void)?
 
     private let browser = BonjourBrowser()
     private var advertiser: BonjourAdvertiser?
@@ -97,6 +97,9 @@ public final class AppState {
     // Elastic mode pulsing
     private var pulseTimer: DispatchSourceTimer?
     private var pulseStartTime: Double = 0
+
+    // Physics config sync debounce
+    private var configSendTimer: DispatchWorkItem?
 
     public init() {
         ensureAccessibility()
@@ -147,7 +150,7 @@ public final class AppState {
         DispatchQueue.main.async {
             self.edgeProximity = 0
             self.cursorVelocity = 0
-            self.onEdgeGlowUpdate?(0, true, 0, 0)
+            self.onEdgeGlowUpdate?(0, true, 0, 0, self.transitionPhysics.blurIntensity)
             self.connectionStatus = .disconnected
             self.forwardingState = .idle
             self.pairedDeviceName = nil
@@ -207,6 +210,7 @@ public final class AppState {
                     self?.connectionStatus = .connected
                     print("[App] Connected to \(device.name)")
                     self?.startSenderCapture()
+                    self?.sendPhysicsConfig()
                 case .failed, .cancelled:
                     print("[App] Sender connection lost — restoring local control")
                     self?.restoreLocalControl()
@@ -253,8 +257,9 @@ public final class AppState {
                 // Portal snap flash on transition
                 if self.transitionPhysics.mode == .smooth || self.transitionPhysics.mode == .elastic {
                     let edgeX = self.crossingDisplayRect.maxX
+                    let blur = self.transitionPhysics.blurIntensity
                     DispatchQueue.main.async {
-                        self.onPortalSnap?(true, edgeX)
+                        self.onPortalSnap?(true, edgeX, blur)
                     }
                 }
             } else if newState == .idle {
@@ -378,10 +383,11 @@ public final class AppState {
             if abs(effectiveProx - self._senderProximity) > 0.01 || (effectiveProx == 0) != (self._senderProximity == 0) {
                 self._senderProximity = effectiveProx
                 let vel = velocityNorm
+                let blur = self.transitionPhysics.blurIntensity
                 DispatchQueue.main.async {
                     self.edgeProximity = effectiveProx
                     self.cursorVelocity = self.smoothedVelocity
-                    self.onEdgeGlowUpdate?(effectiveProx, true, cursorDisplay.maxX, vel)
+                    self.onEdgeGlowUpdate?(effectiveProx, true, cursorDisplay.maxX, vel, blur)
                 }
             }
         }
@@ -420,6 +426,10 @@ public final class AppState {
             stateMachine?.receivedDeactivate()
         case .deactivated:
             stateMachine?.receivedDeactivated()
+        case .physicsConfig:
+            if let config = try? InputShareCodec.decodePayload(PhysicsConfigPayload.self, from: env.payload) {
+                applyPhysicsConfig(config)
+            }
         default:
             break
         }
@@ -489,6 +499,7 @@ public final class AppState {
                 case .ready:
                     self?.connectionStatus = .connected
                     self?.pairedDeviceName = "Remote"
+                    self?.sendPhysicsConfig()
                 case .failed, .cancelled:
                     print("[App] Receiver connection lost — restoring local control")
                     self?.restoreLocalControl()
@@ -623,10 +634,11 @@ public final class AppState {
                 if abs(effectiveProx - _receiverProximity) > 0.01 || (effectiveProx == 0) != (_receiverProximity == 0) {
                     _receiverProximity = effectiveProx
                     let vel = recvVelocityNorm
+                    let blur = self.transitionPhysics.blurIntensity
                     DispatchQueue.main.async {
                         self.edgeProximity = effectiveProx
                         self.cursorVelocity = self.smoothedVelocity
-                        self.onEdgeGlowUpdate?(effectiveProx, false, cursorDisplay.minX, vel)
+                        self.onEdgeGlowUpdate?(effectiveProx, false, cursorDisplay.minX, vel, blur)
                     }
                 }
             } else if input.kind == .mouseButton {
@@ -648,10 +660,11 @@ public final class AppState {
             isInjecting = false
             receiverTap?.stopSuppressing()
             _receiverProximity = 0
+            let blur = self.transitionPhysics.blurIntensity
             DispatchQueue.main.async {
                 self.edgeProximity = 0
                 self.cursorVelocity = 0
-                self.onEdgeGlowUpdate?(0, false, 0, 0)
+                self.onEdgeGlowUpdate?(0, false, 0, 0, blur)
                 self.connectionStatus = .connected
                 self.forwardingState = .idle
             }
@@ -665,6 +678,11 @@ public final class AppState {
             )
             if let ackData = try? InputShareCodec.encodeEnvelope(ack) {
                 incomingFramed?.sendFrame(ackData)
+            }
+
+        case .physicsConfig:
+            if let config = try? InputShareCodec.decodePayload(PhysicsConfigPayload.self, from: env.payload) {
+                applyPhysicsConfig(config)
             }
 
         default:
@@ -792,12 +810,65 @@ public final class AppState {
         if let data = try? InputShareCodec.encodeEnvelope(env) {
             incomingFramed?.sendFrame(data)
         }
+        let blur = self.transitionPhysics.blurIntensity
         DispatchQueue.main.async {
             self.edgeProximity = 0
             self.cursorVelocity = 0
-            self.onEdgeGlowUpdate?(0, false, 0, 0)
+            self.onEdgeGlowUpdate?(0, false, 0, 0, blur)
             self.connectionStatus = .connected
             self.forwardingState = .idle
+        }
+    }
+
+    // MARK: - Physics Config Sync
+
+    /// Update transitionPhysics and trigger config sync to the remote machine.
+    public func updatePhysics(_ block: (inout TransitionPhysics) -> Void) {
+        block(&transitionPhysics)
+        scheduleConfigSync()
+    }
+
+    private func scheduleConfigSync() {
+        configSendTimer?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.sendPhysicsConfig()
+        }
+        configSendTimer = work
+        queue.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private func sendPhysicsConfig() {
+        let payload = PhysicsConfigPayload(
+            mode: transitionPhysics.mode.rawValue,
+            springStiffness: Double(transitionPhysics.springStiffness),
+            blurIntensity: Double(transitionPhysics.blurIntensity),
+            portalFriction: Double(transitionPhysics.portalFriction)
+        )
+        guard let payloadData = try? InputShareCodec.encodePayload(payload) else { return }
+        let env = MessageEnvelope(
+            protocolVersion: InputShareCodec.protocolVersion,
+            messageType: .physicsConfig,
+            sequenceNumber: seq.next(),
+            monotonicTimeNs: MonotonicClock.nowNs(),
+            sourceDeviceId: deviceId,
+            payload: payloadData
+        )
+        guard let data = try? InputShareCodec.encodeEnvelope(env) else { return }
+        // Send on whichever connection is active
+        if let framed = framedConnection {
+            framed.sendFrame(data)
+        } else if let incoming = incomingFramed {
+            incoming.sendFrame(data)
+        }
+    }
+
+    private func applyPhysicsConfig(_ payload: PhysicsConfigPayload) {
+        let mode = TransitionMode(rawValue: payload.mode) ?? .smooth
+        DispatchQueue.main.async {
+            self.transitionPhysics.mode = mode
+            self.transitionPhysics.springStiffness = CGFloat(payload.springStiffness)
+            self.transitionPhysics.blurIntensity = CGFloat(payload.blurIntensity)
+            self.transitionPhysics.portalFriction = CGFloat(payload.portalFriction)
         }
     }
 

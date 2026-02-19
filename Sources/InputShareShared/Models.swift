@@ -13,6 +13,7 @@ public enum InputShareMessageType: String, Codable, Sendable {
     case deactivated
     case pairRequest
     case pairAccept
+    case physicsConfig
 }
 
 public struct MessageEnvelope: Codable, Sendable {
@@ -139,6 +140,20 @@ public struct PairRequestPayload: Codable, Sendable {
     public init(deviceName: String, deviceId: String) {
         self.deviceName = deviceName
         self.deviceId = deviceId
+    }
+}
+
+public struct PhysicsConfigPayload: Codable, Sendable {
+    public var mode: String
+    public var springStiffness: Double
+    public var blurIntensity: Double
+    public var portalFriction: Double
+
+    public init(mode: String, springStiffness: Double, blurIntensity: Double, portalFriction: Double) {
+        self.mode = mode
+        self.springStiffness = springStiffness
+        self.blurIntensity = blurIntensity
+        self.portalFriction = portalFriction
     }
 }
 

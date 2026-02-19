@@ -50,7 +50,7 @@ struct PhysicsLabView: View {
     private var modePicker: some View {
         Menu {
             ForEach(TransitionMode.allCases, id: \.self) { mode in
-                Button(action: { appState.transitionPhysics.mode = mode }) {
+                Button(action: { appState.updatePhysics { $0.mode = mode } }) {
                     HStack {
                         Text(mode.rawValue.capitalized)
                         if appState.transitionPhysics.mode == mode {
@@ -98,7 +98,7 @@ struct PhysicsLabView: View {
                 label: "Spring Stiffness",
                 value: Binding(
                     get: { appState.transitionPhysics.springStiffness },
-                    set: { appState.transitionPhysics.springStiffness = $0 }
+                    set: { v in appState.updatePhysics { $0.springStiffness = v } }
                 ),
                 displayFormatter: { String(format: "%.0f%%", $0 * 100) }
             )
@@ -106,7 +106,7 @@ struct PhysicsLabView: View {
                 label: "Blur Intensity",
                 value: Binding(
                     get: { appState.transitionPhysics.blurIntensity },
-                    set: { appState.transitionPhysics.blurIntensity = $0 }
+                    set: { v in appState.updatePhysics { $0.blurIntensity = v } }
                 ),
                 displayFormatter: { String(format: "%.0f%%", $0 * 100) }
             )
@@ -114,7 +114,7 @@ struct PhysicsLabView: View {
                 label: "Portal Friction",
                 value: Binding(
                     get: { appState.transitionPhysics.portalFriction },
-                    set: { appState.transitionPhysics.portalFriction = $0 }
+                    set: { v in appState.updatePhysics { $0.portalFriction = v } }
                 ),
                 displayFormatter: { String(format: "%.0f%%", $0 * 100) }
             )

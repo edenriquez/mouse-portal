@@ -10,7 +10,8 @@ final class EdgeGlowPanel {
     /// Create or update the glow panel. Proximity 0→1 controls alpha (progressive fade-in).
     /// edgeX is the X coordinate of the screen boundary (used to find the correct NSScreen).
     /// velocity is 0...1 normalized edge-ward velocity for dynamic width.
-    func update(proximity: CGFloat, rightEdge: Bool, edgeX: CGFloat, velocity: CGFloat) {
+    /// blurIntensity is 0...1 controlling glow spread and diffusion.
+    func update(proximity: CGFloat, rightEdge: Bool, edgeX: CGFloat, velocity: CGFloat, blurIntensity: CGFloat) {
         if proximity > 0.01 {
             let targetWidth: CGFloat = 66 + velocity * 54  // 66pt at rest → 120pt at max velocity
             let needsRecreate = panel == nil
@@ -18,7 +19,7 @@ final class EdgeGlowPanel {
                 || abs(currentEdgeX - edgeX) > 2
                 || abs(currentWidth - targetWidth) > 8
             if needsRecreate {
-                createPanel(rightEdge: rightEdge, edgeX: edgeX, width: targetWidth, velocity: velocity)
+                createPanel(rightEdge: rightEdge, edgeX: edgeX, width: targetWidth, velocity: velocity, blurIntensity: blurIntensity)
             }
             panel?.alphaValue = proximity
         } else {
@@ -27,12 +28,13 @@ final class EdgeGlowPanel {
     }
 
     /// Flash the portal on transition — light streak bridge effect.
-    func showPortalSnap(rightEdge: Bool, edgeX: CGFloat) {
-        createPanel(rightEdge: rightEdge, edgeX: edgeX, width: 140, velocity: 1.0)
+    func showPortalSnap(rightEdge: Bool, edgeX: CGFloat, blurIntensity: CGFloat) {
+        createPanel(rightEdge: rightEdge, edgeX: edgeX, width: 140, velocity: 1.0, blurIntensity: blurIntensity)
         panel?.alphaValue = 1.0
 
+        let duration = 0.2 + Double(blurIntensity) * 0.4
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.4
+            ctx.duration = duration
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel?.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
@@ -48,7 +50,7 @@ final class EdgeGlowPanel {
         currentWidth = 66
     }
 
-    private func createPanel(rightEdge: Bool, edgeX: CGFloat, width: CGFloat, velocity: CGFloat) {
+    private func createPanel(rightEdge: Bool, edgeX: CGFloat, width: CGFloat, velocity: CGFloat, blurIntensity: CGFloat) {
         hide()
         isRightEdge = rightEdge
         currentEdgeX = edgeX
@@ -88,7 +90,7 @@ final class EdgeGlowPanel {
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         p.alphaValue = 0
 
-        let hostingView = NSHostingView(rootView: EdgeGlowView(rightEdge: rightEdge, velocity: velocity))
+        let hostingView = NSHostingView(rootView: EdgeGlowView(rightEdge: rightEdge, velocity: velocity, blurIntensity: blurIntensity))
         p.contentView = hostingView
         p.orderFrontRegardless()
         panel = p
@@ -100,18 +102,20 @@ final class EdgeGlowPanel {
 private struct EdgeGlowView: View {
     let rightEdge: Bool
     let velocity: CGFloat   // 0...1 normalized
+    let blurIntensity: CGFloat  // 0...1 controls glow spread and diffusion
     @State private var breathing = false
 
     private let portalBlue = Color(red: 0.075, green: 0.498, blue: 0.925)
 
     var body: some View {
+        let shadowRadius: CGFloat = 8 + blurIntensity * 32
         ZStack {
             // Main gradient glow
             Rectangle()
                 .fill(gradient)
                 .opacity(breathing ? max(1.0, 0.7 + velocity * 0.3) : 0.7 + velocity * 0.3)
                 .brightness(breathing ? 0.15 : 0)
-                .shadow(color: portalBlue.opacity(0.3), radius: 20,
+                .shadow(color: portalBlue.opacity(0.3), radius: shadowRadius,
                         x: rightEdge ? -5 : 5, y: 0)
 
             // Motion trail — visible when velocity > 0.2
@@ -132,6 +136,7 @@ private struct EdgeGlowView: View {
     private var motionTrail: some View {
         GeometryReader { geo in
             let trailWidth = velocity * 40
+            let trailHeight: CGFloat = 2 + blurIntensity * 4
             HStack(spacing: 0) {
                 if !rightEdge {
                     Spacer()
@@ -144,7 +149,7 @@ private struct EdgeGlowView: View {
                             endPoint: rightEdge ? .trailing : .leading
                         )
                     )
-                    .frame(width: trailWidth, height: 2)
+                    .frame(width: trailWidth, height: trailHeight)
                 if rightEdge {
                     Spacer()
                 }
@@ -154,11 +159,12 @@ private struct EdgeGlowView: View {
     }
 
     private var gradient: LinearGradient {
+        let spread = 1 - blurIntensity * 0.3
         let stops: [Gradient.Stop] = [
             .init(color: .clear, location: 0),
-            .init(color: portalBlue.opacity(0.15), location: 0.25),
-            .init(color: portalBlue.opacity(0.4), location: 0.55),
-            .init(color: portalBlue.opacity(0.7), location: 0.8),
+            .init(color: portalBlue.opacity(0.15), location: 0.25 * spread),
+            .init(color: portalBlue.opacity(0.4), location: 0.55 * spread),
+            .init(color: portalBlue.opacity(0.7), location: 0.8 * spread),
             .init(color: portalBlue, location: 1.0),
         ]
         if rightEdge {
