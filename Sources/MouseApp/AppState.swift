@@ -56,11 +56,11 @@ public final class AppState {
     private var receiverCursorPos: CGPoint = .zero
     private var receiverGeometry: ScreenGeometry?
 
-    // Mouse move coalescing — only send latest position at fixed interval
+    // Mouse move coalescing — send first event immediately, coalesce bursts
     private var pendingMouseMove: InputEvent?
     private var pendingScroll: InputEvent?
     private var coalesceTimer: DispatchSourceTimer?
-    private static let coalesceInterval: TimeInterval = 0.004  // ~250 Hz
+    private static let coalesceInterval: TimeInterval = 0.001  // 1ms flush interval for accumulated events
 
     // Edge proximity tracking (drives progressive glow)
     private var _senderProximity: CGFloat = 0
@@ -266,37 +266,33 @@ public final class AppState {
         let cap = EventTapCapture(handler: { [weak self] input in
             guard let self, self.stateMachine?.state == .forwarding else { return }
             if input.kind == .mouseMove {
-                // Coalesce mouse moves — accumulate deltas so none are lost
+                // Send first move immediately; accumulate subsequent burst events for timer flush
                 if var pending = self.pendingMouseMove {
+                    // Burst: accumulate deltas into pending (timer will flush)
                     pending.mouseDeltaX = (pending.mouseDeltaX ?? 0) + (input.mouseDeltaX ?? 0)
                     pending.mouseDeltaY = (pending.mouseDeltaY ?? 0) + (input.mouseDeltaY ?? 0)
                     pending.normalizedPosition = input.normalizedPosition
                     pending.flags = input.flags
                     self.pendingMouseMove = pending
                 } else {
-                    self.pendingMouseMove = input
+                    // First event in burst: send immediately, mark slot so next one coalesces
+                    self.sendInputEvent(input)
+                    // Set a zero-delta placeholder so the next move knows to coalesce
+                    self.pendingMouseMove = InputEvent(kind: .mouseMove, normalizedPosition: input.normalizedPosition, mouseDeltaX: 0, mouseDeltaY: 0, flags: input.flags)
                 }
             } else if input.kind == .scroll {
-                // Coalesce scroll events — accumulate deltas
+                // Send first scroll immediately; accumulate subsequent
                 if var pending = self.pendingScroll, let newScroll = input.scroll {
-                    let oldDx = pending.scroll?.deltaX ?? 0
-                    let oldDy = pending.scroll?.deltaY ?? 0
-                    pending.scroll = ScrollDelta(deltaX: oldDx + newScroll.deltaX, deltaY: oldDy + newScroll.deltaY)
+                    pending.scroll = ScrollDelta(deltaX: (pending.scroll?.deltaX ?? 0) + newScroll.deltaX, deltaY: (pending.scroll?.deltaY ?? 0) + newScroll.deltaY)
                     pending.flags = input.flags
                     self.pendingScroll = pending
                 } else {
-                    self.pendingScroll = input
+                    self.sendInputEvent(input)
+                    self.pendingScroll = InputEvent(kind: .scroll, scroll: ScrollDelta(deltaX: 0, deltaY: 0), flags: input.flags)
                 }
             } else {
                 // Flush pending mouse move and scroll before sending non-move events
-                if let pending = self.pendingMouseMove {
-                    self.pendingMouseMove = nil
-                    self.sendInputEvent(pending)
-                }
-                if let pending = self.pendingScroll {
-                    self.pendingScroll = nil
-                    self.sendInputEvent(pending)
-                }
+                self.flushPendingMoveAndScroll()
                 self.sendInputEvent(input)
             }
         }, queue: queue, geometry: geometry)
@@ -588,20 +584,28 @@ public final class AppState {
 
     // MARK: - Mouse Move Coalescing
 
+    private func flushPendingMoveAndScroll() {
+        if let pending = pendingMouseMove {
+            pendingMouseMove = nil
+            // Only send if there are actual accumulated deltas
+            if (pending.mouseDeltaX ?? 0) != 0 || (pending.mouseDeltaY ?? 0) != 0 {
+                sendInputEvent(pending)
+            }
+        }
+        if let pending = pendingScroll {
+            pendingScroll = nil
+            if (pending.scroll?.deltaX ?? 0) != 0 || (pending.scroll?.deltaY ?? 0) != 0 {
+                sendInputEvent(pending)
+            }
+        }
+    }
+
     private func startCoalesceTimer() {
         stopCoalesceTimer()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now(), repeating: Self.coalesceInterval, leeway: .milliseconds(1))
+        timer.schedule(deadline: .now(), repeating: Self.coalesceInterval, leeway: .microseconds(500))
         timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            if let pending = self.pendingMouseMove {
-                self.pendingMouseMove = nil
-                self.sendInputEvent(pending)
-            }
-            if let pending = self.pendingScroll {
-                self.pendingScroll = nil
-                self.sendInputEvent(pending)
-            }
+            self?.flushPendingMoveAndScroll()
         }
         coalesceTimer = timer
         timer.resume()
