@@ -27,8 +27,9 @@ public final class AppState {
     /// Derived: true when cursor is close enough to show portal warning in UI.
     public var isNearEdge: Bool { edgeProximity > 0.05 }
 
-    /// Called on main queue with (proximity, isRightEdge) to drive glow panel.
-    public var onEdgeGlowUpdate: ((_ proximity: CGFloat, _ rightEdge: Bool) -> Void)?
+    /// Called on main queue with (proximity, isRightEdge, edgeX) to drive glow panel.
+    /// edgeX is the X coordinate of the screen boundary edge (used to find the correct NSScreen).
+    public var onEdgeGlowUpdate: ((_ proximity: CGFloat, _ rightEdge: Bool, _ edgeX: CGFloat) -> Void)?
 
     private let browser = BonjourBrowser()
     private var advertiser: BonjourAdvertiser?
@@ -46,8 +47,9 @@ public final class AppState {
     private let seq = Sequencer()
     private let deviceId = Host.current().localizedName ?? UUID().uuidString
 
-    // Y coordinate (in screen coords) where cursor crossed the edge
+    // Position and display where cursor crossed the edge
     private var crossingPosition: CGPoint = .zero
+    private var crossingDisplayRect: CGRect = .zero
 
     // Receiver cursor tracking — apply deltas instead of denormalizing
     private var receiverCursorPos: CGPoint = .zero
@@ -106,7 +108,7 @@ public final class AppState {
 
         DispatchQueue.main.async {
             self.edgeProximity = 0
-            self.onEdgeGlowUpdate?(0, true)
+            self.onEdgeGlowUpdate?(0, true, 0)
             self.connectionStatus = .disconnected
             self.forwardingState = .idle
             self.pairedDeviceName = nil
@@ -210,9 +212,8 @@ public final class AppState {
                 self.stopCoalesceTimer()
 
                 if wasSuppressing {
-                    // Returning — place cursor at right edge at the return Y
-                    let geo = ScreenGeometry.allDisplays()
-                    let returnPos = CGPoint(x: geo.bounds.maxX - 2, y: self.crossingPosition.y)
+                    // Returning — place cursor at the right edge of the display where we originally crossed
+                    let returnPos = CGPoint(x: self.crossingDisplayRect.maxX - 2, y: self.crossingPosition.y)
                     CGWarpMouseCursorPosition(returnPos)
                     self.edgeDetector?.armAfterEntry()
                 }
@@ -251,8 +252,10 @@ public final class AppState {
 
         edge.onEdgeEvent = { [weak self] event in
             if case .triggered(let pos) = event {
-                print("[App] Right edge triggered at Y=\(Int(pos.y))")
+                let display = geometry.displayContaining(point: pos)
+                print("[App] Right edge triggered at Y=\(Int(pos.y)) on display \(Int(display.width))x\(Int(display.height))")
                 self?.crossingPosition = pos
+                self?.crossingDisplayRect = display
                 self?.stateMachine?.edgeTriggered()
             }
         }
@@ -309,7 +312,7 @@ public final class AppState {
                 self._senderProximity = prox
                 DispatchQueue.main.async {
                     self.edgeProximity = prox
-                    self.onEdgeGlowUpdate?(prox, true)
+                    self.onEdgeGlowUpdate?(prox, true, cursorDisplay.maxX)
                 }
             }
         }
@@ -330,14 +333,11 @@ public final class AppState {
             print("[App] Received activated ack from receiver")
             stateMachine?.receivedActivated()
         case .deactivate:
-            // Read return Y from receiver
+            // Read return Y from receiver, denormalize against the display where we originally crossed
             if let deactPayload = try? InputShareCodec.decodePayload(DeactivatePayload.self, from: env.payload) {
-                // Denormalize return Y against the right-edge display
-                let geo = ScreenGeometry.allDisplays()
-                let edgeDisplay = geo.displayAtRightEdge()
-                let returnY = edgeDisplay.minY + CGFloat(deactPayload.normalizedY) * edgeDisplay.height
-                crossingPosition = CGPoint(x: geo.bounds.maxX, y: returnY)
-                print("[App] Received deactivate from receiver — returning at Y=\(Int(returnY))")
+                let returnY = crossingDisplayRect.minY + CGFloat(deactPayload.normalizedY) * crossingDisplayRect.height
+                crossingPosition = CGPoint(x: crossingDisplayRect.maxX, y: returnY)
+                print("[App] Received deactivate from receiver — returning at Y=\(Int(returnY)) on display \(Int(crossingDisplayRect.width))x\(Int(crossingDisplayRect.height))")
             } else {
                 print("[App] Received deactivate from receiver — returning control")
             }
@@ -397,8 +397,10 @@ public final class AppState {
         returnEdge.onEdgeEvent = { [weak self] event in
             guard let self, self.isInjecting else { return }
             if case .triggered(let pos) = event {
-                print("[App] Left edge triggered at Y=\(Int(pos.y)) — returning control")
+                let display = geometry.displayContaining(point: pos)
+                print("[App] Left edge triggered at Y=\(Int(pos.y)) on display \(Int(display.width))x\(Int(display.height)) — returning control")
                 self.crossingPosition = pos
+                self.crossingDisplayRect = display
                 self.isInjecting = false
                 self.sendDeactivateOnIncoming()
             }
@@ -527,7 +529,7 @@ public final class AppState {
                     _receiverProximity = prox
                     DispatchQueue.main.async {
                         self.edgeProximity = prox
-                        self.onEdgeGlowUpdate?(prox, false)
+                        self.onEdgeGlowUpdate?(prox, false, cursorDisplay.minX)
                     }
                 }
             } else if input.kind == .mouseButton {
@@ -551,7 +553,7 @@ public final class AppState {
             _receiverProximity = 0
             DispatchQueue.main.async {
                 self.edgeProximity = 0
-                self.onEdgeGlowUpdate?(0, false)
+                self.onEdgeGlowUpdate?(0, false, 0)
                 self.connectionStatus = .connected
                 self.forwardingState = .idle
             }
@@ -625,10 +627,8 @@ public final class AppState {
     }
 
     private func sendActivate() {
-        // Normalize Y against the display at the right edge, not the full virtual screen.
-        // This ensures the Y maps correctly regardless of how the other machine's displays are arranged.
-        let geo = ScreenGeometry.allDisplays()
-        let edgeDisplay = geo.displayAtRightEdge()
+        // Normalize Y against the display where the cursor crossed the edge
+        let edgeDisplay = crossingDisplayRect
         let normY = (crossingPosition.y - edgeDisplay.minY) / edgeDisplay.height
         print("[App] Sending activate to receiver (normY=\(String(format: "%.3f", normY)), edgeDisplay=\(Int(edgeDisplay.width))x\(Int(edgeDisplay.height)))...")
         let payload = (try? InputShareCodec.encodePayload(ActivatePayload(normalizedPosition: NormalizedPoint(x: 0.0, y: normY)))) ?? Data()
@@ -661,10 +661,8 @@ public final class AppState {
     }
 
     private func sendDeactivateOnIncoming() {
-        // Normalize return Y against the left-edge display
-        let geo = receiverGeometry ?? ScreenGeometry.allDisplays()
-        let leftDisplay = geo.displayAtLeftEdge()
-        let normY = (crossingPosition.y - leftDisplay.minY) / leftDisplay.height
+        // Normalize return Y against the display where the left edge was triggered
+        let normY = (crossingPosition.y - crossingDisplayRect.minY) / crossingDisplayRect.height
         print("[App] Sending deactivate (return) to sender (normY=\(String(format: "%.3f", normY))), restoring local input...")
         receiverTap?.stopSuppressing()
         _receiverProximity = 0
@@ -682,7 +680,7 @@ public final class AppState {
         }
         DispatchQueue.main.async {
             self.edgeProximity = 0
-            self.onEdgeGlowUpdate?(0, false)
+            self.onEdgeGlowUpdate?(0, false, 0)
             self.connectionStatus = .connected
             self.forwardingState = .idle
         }

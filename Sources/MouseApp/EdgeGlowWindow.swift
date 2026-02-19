@@ -4,12 +4,14 @@ import SwiftUI
 final class EdgeGlowPanel {
     private var panel: NSPanel?
     private var isRightEdge: Bool?
+    private var currentEdgeX: CGFloat = 0
 
     /// Create or update the glow panel. Proximity 0→1 controls alpha (progressive fade-in).
-    func update(proximity: CGFloat, rightEdge: Bool) {
+    /// edgeX is the X coordinate of the screen boundary (used to find the correct NSScreen).
+    func update(proximity: CGFloat, rightEdge: Bool, edgeX: CGFloat) {
         if proximity > 0.01 {
-            if panel == nil || isRightEdge != rightEdge {
-                createPanel(rightEdge: rightEdge)
+            if panel == nil || isRightEdge != rightEdge || abs(currentEdgeX - edgeX) > 2 {
+                createPanel(rightEdge: rightEdge, edgeX: edgeX)
             }
             panel?.alphaValue = proximity
         } else {
@@ -21,17 +23,22 @@ final class EdgeGlowPanel {
         panel?.orderOut(nil)
         panel = nil
         isRightEdge = nil
+        currentEdgeX = 0
     }
 
-    private func createPanel(rightEdge: Bool) {
+    private func createPanel(rightEdge: Bool, edgeX: CGFloat) {
         hide()
         isRightEdge = rightEdge
+        currentEdgeX = edgeX
 
+        // Find the NSScreen whose edge matches edgeX (X coordinates are same in CG and AppKit)
         let screen: NSScreen?
         if rightEdge {
-            screen = NSScreen.screens.max(by: { $0.frame.maxX < $1.frame.maxX })
+            screen = NSScreen.screens.first { abs($0.frame.maxX - edgeX) < 2 }
+                ?? NSScreen.screens.max(by: { $0.frame.maxX < $1.frame.maxX })
         } else {
-            screen = NSScreen.screens.min(by: { $0.frame.minX < $1.frame.minX })
+            screen = NSScreen.screens.first { abs($0.frame.minX - edgeX) < 2 }
+                ?? NSScreen.screens.min(by: { $0.frame.minX < $1.frame.minX })
         }
         guard let screen else { return }
 

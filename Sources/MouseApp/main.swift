@@ -30,8 +30,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.popover = popover
 
         // Edge glow overlay — progressive fade-in as cursor approaches screen edge
-        appState.onEdgeGlowUpdate = { [weak self] proximity, rightEdge in
-            self?.edgeGlowPanel.update(proximity: proximity, rightEdge: rightEdge)
+        appState.onEdgeGlowUpdate = { [weak self] proximity, rightEdge, edgeX in
+            self?.edgeGlowPanel.update(proximity: proximity, rightEdge: rightEdge, edgeX: edgeX)
         }
 
         // Periodically update menu bar appearance
