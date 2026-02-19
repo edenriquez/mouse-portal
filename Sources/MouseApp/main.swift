@@ -6,6 +6,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover?
     let appState = AppState()
     private var statusTimer: Timer?
+    private let edgeGlowPanel = EdgeGlowPanel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Menu bar item
@@ -28,9 +29,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = hosting
         self.popover = popover
 
+        // Edge glow overlay — progressive fade-in as cursor approaches screen edge
+        appState.onEdgeGlowUpdate = { [weak self] proximity, rightEdge, edgeX in
+            self?.edgeGlowPanel.update(proximity: proximity, rightEdge: rightEdge, edgeX: edgeX)
+        }
+
         // Periodically update menu bar appearance
         statusTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             self?.updateStatusItem()
+            if self?.appState.connectionStatus == .disconnected {
+                self?.edgeGlowPanel.hide()
+            }
         }
     }
 
