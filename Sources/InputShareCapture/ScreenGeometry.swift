@@ -58,6 +58,36 @@ public struct ScreenGeometry {
         displayRects.min(by: { $0.minX < $1.minX }) ?? bounds
     }
 
+    /// Returns the display containing the given point, or the closest one.
+    public func displayContaining(point: CGPoint) -> CGRect {
+        for rect in displayRects {
+            if rect.contains(point) { return rect }
+        }
+        // Fallback: closest display by center distance
+        return displayRects.min(by: {
+            hypot($0.midX - point.x, $0.midY - point.y) < hypot($1.midX - point.x, $1.midY - point.y)
+        }) ?? bounds
+    }
+
+    /// Distance from `point` to the right screen boundary of the display it's on.
+    /// Returns infinity if the display's right edge is not a screen boundary (has adjacent display).
+    public func distanceToRightBoundary(from point: CGPoint) -> CGFloat {
+        let display = displayContaining(point: point)
+        let probe = CGPoint(x: display.maxX + 1, y: point.y)
+        let hasAdjacent = displayRects.contains(where: { $0.contains(probe) })
+        if hasAdjacent { return .infinity }
+        return display.maxX - point.x
+    }
+
+    /// Distance from `point` to the left screen boundary of the display it's on.
+    public func distanceToLeftBoundary(from point: CGPoint) -> CGFloat {
+        let display = displayContaining(point: point)
+        let probe = CGPoint(x: display.minX - 1, y: point.y)
+        let hasAdjacent = displayRects.contains(where: { $0.contains(probe) })
+        if hasAdjacent { return .infinity }
+        return point.x - display.minX
+    }
+
     public func normalize(point: CGPoint) -> (x: Double, y: Double) {
         let x = (point.x - bounds.minX) / bounds.width
         let y = (point.y - bounds.minY) / bounds.height

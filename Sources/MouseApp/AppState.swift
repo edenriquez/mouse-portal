@@ -244,6 +244,7 @@ public final class AppState {
         let edge = EdgeDetector(
             trigger: EdgeTrigger(zone: .right, dwellTime: 0.1),
             screenBounds: geometry.bounds,
+            displayRects: geometry.displayRects,
             queue: queue
         )
         edgeDetector = edge
@@ -298,11 +299,11 @@ public final class AppState {
             guard let self else { return }
             self.edgeDetector?.update(position: point)
 
-            // Progressive edge glow — distance to right edge → proximity 0..1
+            // Progressive edge glow — distance to right boundary of cursor's display
             let suppressing = self.capture?.isSuppressing ?? false
-            let edgeDisplay = geometry.displayAtRightEdge()
-            let glowZone = edgeDisplay.width * Self.glowZoneFraction
-            let dist = suppressing ? CGFloat.infinity : (geometry.bounds.maxX - point.x)
+            let cursorDisplay = geometry.displayContaining(point: point)
+            let glowZone = cursorDisplay.width * Self.glowZoneFraction
+            let dist = suppressing ? CGFloat.infinity : geometry.distanceToRightBoundary(from: point)
             let prox = max(0, min(1, 1 - dist / glowZone))
             if abs(prox - self._senderProximity) > 0.01 || (prox == 0) != (self._senderProximity == 0) {
                 self._senderProximity = prox
@@ -388,6 +389,7 @@ public final class AppState {
         let returnEdge = EdgeDetector(
             trigger: EdgeTrigger(zone: .left, dwellTime: 0.1),
             screenBounds: geometry.bounds,
+            displayRects: geometry.displayRects,
             queue: queue
         )
         returnEdgeDetector = returnEdge
@@ -516,10 +518,10 @@ public final class AppState {
 
                 returnEdgeDetector?.update(position: receiverCursorPos)
 
-                // Progressive edge glow — distance to left edge → proximity 0..1
-                let leftDisplay = geometry.displayAtLeftEdge()
-                let glowZone = leftDisplay.width * Self.glowZoneFraction
-                let dist = receiverCursorPos.x - geometry.bounds.minX
+                // Progressive edge glow — distance to left boundary of cursor's display
+                let cursorDisplay = geometry.displayContaining(point: receiverCursorPos)
+                let glowZone = cursorDisplay.width * Self.glowZoneFraction
+                let dist = geometry.distanceToLeftBoundary(from: receiverCursorPos)
                 let prox = max(0, min(1, 1 - dist / glowZone))
                 if abs(prox - _receiverProximity) > 0.01 || (prox == 0) != (_receiverProximity == 0) {
                     _receiverProximity = prox

@@ -33,15 +33,17 @@ public final class EdgeDetector: @unchecked Sendable {
 
     private let trigger: EdgeTrigger
     private let screenBounds: CGRect
+    private let displayRects: [CGRect]
     private var isInZone = false
     private var dwellTimer: DispatchWorkItem?
     private var hasTriggered = false
     private let queue: DispatchQueue
     private var lastPosition: CGPoint = .zero
 
-    public init(trigger: EdgeTrigger, screenBounds: CGRect, queue: DispatchQueue = .main) {
+    public init(trigger: EdgeTrigger, screenBounds: CGRect, displayRects: [CGRect] = [], queue: DispatchQueue = .main) {
         self.trigger = trigger
         self.screenBounds = screenBounds
+        self.displayRects = displayRects.isEmpty ? [screenBounds] : displayRects
         self.queue = queue
     }
 
@@ -79,9 +81,9 @@ public final class EdgeDetector: @unchecked Sendable {
         case .topLeft:
             return pos.x <= screenBounds.minX + t && pos.y <= screenBounds.minY + t
         case .right:
-            return pos.x >= screenBounds.maxX - t
+            return isNearScreenBoundary(pos, threshold: t, side: .right)
         case .left:
-            return pos.x <= screenBounds.minX + t
+            return isNearScreenBoundary(pos, threshold: t, side: .left)
         }
     }
 
@@ -93,10 +95,33 @@ public final class EdgeDetector: @unchecked Sendable {
         case .topLeft:
             return pos.x > screenBounds.minX + t || pos.y > screenBounds.minY + t
         case .right:
-            return pos.x < screenBounds.maxX - t
+            return !isNearScreenBoundary(pos, threshold: t, side: .right)
         case .left:
-            return pos.x > screenBounds.minX + t
+            return !isNearScreenBoundary(pos, threshold: t, side: .left)
         }
+    }
+
+    private enum Side { case left, right }
+
+    /// True when `pos` is within `threshold` of a display edge that is a true
+    /// screen boundary (no adjacent display on that side at `pos.y`).
+    private func isNearScreenBoundary(_ pos: CGPoint, threshold: CGFloat, side: Side) -> Bool {
+        for rect in displayRects {
+            guard pos.y >= rect.minY && pos.y <= rect.maxY else { continue }
+            switch side {
+            case .right:
+                // Cursor must be on this display and within threshold of its right edge
+                guard pos.x >= rect.minX && pos.x >= rect.maxX - threshold else { continue }
+                // Is there a display to the right at this Y? If not, it's a screen boundary
+                let probe = CGPoint(x: rect.maxX + 1, y: pos.y)
+                if !displayRects.contains(where: { $0.contains(probe) }) { return true }
+            case .left:
+                guard pos.x <= rect.maxX && pos.x <= rect.minX + threshold else { continue }
+                let probe = CGPoint(x: rect.minX - 1, y: pos.y)
+                if !displayRects.contains(where: { $0.contains(probe) }) { return true }
+            }
+        }
+        return false
     }
 
     private func startDwellTimer() {
